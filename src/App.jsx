@@ -266,13 +266,14 @@ export default function TreasureIslandDashboard() {
   const [selectedBoosterSymbol, setSelectedBoosterSymbol] = useState("1");
   const [selectedBoosterMulti, setSelectedBoosterMulti] = useState("2x");
   const [selectedResult, setSelectedResult] = useState("1");
-  const [panelOrder, setPanelOrder] = useState(["quick", "recent", "segments", "boosters", "simulator"]);
+  const [panelOrder, setPanelOrder] = useState(["quick", "recent", "segments", "boosters", "simulator", "wheel"]);
   const [panelSizes, setPanelSizes] = useState({
     quick: "full",
     recent: "full",
     segments: "full",
     boosters: "full",
     simulator: "full",
+    wheel: "full",
   });
   const [pinnedPanels, setPinnedPanels] = useState({
     quick: true,
@@ -280,6 +281,7 @@ export default function TreasureIslandDashboard() {
     segments: true,
     boosters: true,
     simulator: true,
+    wheel: true,
   });
   const [swapA, setSwapA] = useState("quick");
   const [swapB, setSwapB] = useState("recent");
@@ -333,8 +335,10 @@ export default function TreasureIslandDashboard() {
     segments: false,
     boosters: false,
     simulator: false,
+    wheel: false,
   });
   const [storageReady, setStorageReady] = useState(false);
+  const [selectedWheelId, setSelectedWheelId] = useState("1");
 
   useEffect(() => {
     try {
@@ -351,9 +355,11 @@ export default function TreasureIslandDashboard() {
         if (data.selectedBoosterSymbol) setSelectedBoosterSymbol(data.selectedBoosterSymbol);
         if (data.selectedBoosterMulti) setSelectedBoosterMulti(data.selectedBoosterMulti);
         if (data.selectedResult) setSelectedResult(data.selectedResult);
-        if (Array.isArray(data.panelOrder)) setPanelOrder(data.panelOrder);
-        if (data.panelSizes) setPanelSizes(data.panelSizes);
-        if (data.pinnedPanels) setPinnedPanels(data.pinnedPanels);
+        if (Array.isArray(data.panelOrder)) {
+          setPanelOrder(data.panelOrder.includes("wheel") ? data.panelOrder : [...data.panelOrder, "wheel"]);
+        }
+        if (data.panelSizes) setPanelSizes({ ...data.panelSizes, wheel: data.panelSizes.wheel || "full" });
+        if (data.pinnedPanels) setPinnedPanels({ ...data.pinnedPanels, wheel: data.pinnedPanels.wheel ?? true });
         if (data.swapA) setSwapA(data.swapA);
         if (data.swapB) setSwapB(data.swapB);
         if (typeof data.bankrollStart === "number") setBankrollStart(data.bankrollStart);
@@ -371,7 +377,8 @@ export default function TreasureIslandDashboard() {
         if (data.excludedSimulationRows) setExcludedSimulationRows(data.excludedSimulationRows);
         if (Array.isArray(data.pausedSimulationRows)) setPausedSimulationRows(data.pausedSimulationRows);
         if (data.lastPausedLength !== undefined) setLastPausedLength(data.lastPausedLength);
-        if (data.collapsedPanels) setCollapsedPanels(data.collapsedPanels);
+        if (data.collapsedPanels) setCollapsedPanels({ ...data.collapsedPanels, wheel: data.collapsedPanels.wheel ?? false });
+        if (data.selectedWheelId) setSelectedWheelId(data.selectedWheelId);
       }
     } catch (error) {
       console.warn("Impossible de charger les données sauvegardées", error);
@@ -414,6 +421,7 @@ export default function TreasureIslandDashboard() {
       pausedSimulationRows,
       lastPausedLength,
       collapsedPanels,
+      selectedWheelId,
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -449,6 +457,7 @@ export default function TreasureIslandDashboard() {
     pausedSimulationRows,
     lastPausedLength,
     collapsedPanels,
+    selectedWheelId,
   ]);
 
   const resetBasicData = () => {
@@ -511,6 +520,7 @@ export default function TreasureIslandDashboard() {
     segments: "Tableau probabilités et retards",
     boosters: "Tracking booster",
     simulator: "Simulation de session",
+    wheel: "Roue interactive",
   };
 
   const swapSelectedPanels = () => {
@@ -1850,7 +1860,139 @@ export default function TreasureIslandDashboard() {
     </Panel>
   );
 
-  const panels = { quick: quickPanel, recent: recentPanel, segments: segmentsPanel, boosters: boostersPanel, simulator: simulatorPanel };
+  const wheelSegments = [
+    "treasure", "1", "2", "5", "2", "1",
+    "loot", "1", "10", "5", "1", "2",
+    "marbles", "1", "2", "5", "2", "1",
+    "map", "1", "2", "10", "5", "1",
+    "loot", "1", "2", "5", "2", "1",
+    "loot", "1", "2", "10", "2", "1",
+    "map", "1", "2", "5", "2", "1",
+    "marbles", "1", "2", "5", "2", "1",
+    "loot", "1", "10", "5", "2", "1",
+  ];
+
+  const wheelPanel = (
+    <Panel
+      title="Roue interactive"
+      subtitle="Simulation visuelle des 54 segments"
+      collapsed={collapsedPanels.wheel}
+      onToggle={() => togglePanel("wheel")}
+      action={<><Button onClick={() => togglePinnedPanel("wheel")} className={`rounded-xl border border-white/10 ${pinnedPanels.wheel ? "bg-amber-400 text-black" : "bg-black/25 hover:bg-white/15"}`}>📌</Button><Button onClick={() => togglePanelSize("wheel")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.wheel === "full" ? "½" : "↔"}</Button></>}
+    >
+      <div className="grid gap-6 lg:grid-cols-[420px_1fr] lg:items-center">
+        <div className="relative mx-auto aspect-square w-full max-w-[520px] rounded-full border-[10px] border-[#5b3a1d] bg-[#1b1008] p-3 shadow-[0_0_70px_rgba(251,191,36,0.16)]">
+          <svg viewBox="0 0 100 100" className="h-full w-full overflow-visible">
+            <defs>
+              <radialGradient id="wheelWood" cx="50%" cy="50%" r="55%">
+                <stop offset="0%" stopColor="#f6d59b" />
+                <stop offset="55%" stopColor="#d3a866" />
+                <stop offset="100%" stopColor="#8b5a2b" />
+              </radialGradient>
+              <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="2" stdDeviation="1.2" floodColor="#000" floodOpacity="0.55" />
+              </filter>
+            </defs>
+
+            <circle cx="50" cy="50" r="47" fill="url(#wheelWood)" stroke="#2b1a0d" strokeWidth="2" />
+            <circle cx="50" cy="50" r="39" fill="none" stroke="rgba(80,45,20,0.35)" strokeWidth="0.8" />
+            <circle cx="50" cy="50" r="47" fill="none" stroke="#c99a48" strokeWidth="1.1" />
+
+            {wheelSegments.map((id, index) => {
+              const angle = (index / wheelSegments.length) * 360 - 90;
+              const nextAngle = ((index + 1) / wheelSegments.length) * 360 - 90;
+              const mid = (angle + nextAngle) / 2;
+              const rad = (Math.PI / 180) * mid;
+              const symbol = SYMBOLS.find((s) => s.id === id);
+              const fill = {
+                "1": "#d79622",
+                "2": "#15803d",
+                "5": "#0e7490",
+                "10": "#b91c1c",
+                loot: "#166534",
+                marbles: "#1d4ed8",
+                map: "#c2410c",
+                treasure: "#9f1239",
+              }[id];
+
+              const isBonus = BONUS_IDS.includes(id);
+              const placementRadius = isBonus ? 31 : 40;
+              const x = 50 + placementRadius * Math.cos(rad);
+              const y = 50 + placementRadius * Math.sin(rad);
+              const label = isBonus ? (symbol?.short || id).toUpperCase() : id;
+
+              return (
+                <g key={`${id}-${index}`} onClick={() => setSelectedWheelId(id)} className="cursor-pointer">
+                  {isBonus ? (
+                    <g transform={`translate(${x} ${y})`}>
+                      <rect x="-6" y="-2" width="12" height="4" rx="1" fill={fill} stroke="#f5d38b" strokeWidth="0.35" filter="url(#softShadow)" opacity={selectedWheelId === id ? 1 : 0.92} />
+                      <text textAnchor="middle" dominantBaseline="middle" fontSize="1.25" fontWeight="900" fill="#fff7d6" stroke="rgba(0,0,0,0.75)" strokeWidth="0.25" paintOrder="stroke">
+                        {label}
+                      </text>
+                    </g>
+                  ) : (
+                    <g transform={`translate(${x} ${y})`}>
+                      <circle r="2.65" fill={fill} stroke={selectedWheelId === id ? "#fde68a" : "#2b1a0d"} strokeWidth={selectedWheelId === id ? "0.75" : "0.35"} filter="url(#softShadow)" opacity={selectedWheelId === id ? 1 : 0.95} />
+                      <text textAnchor="middle" dominantBaseline="middle" fontSize={id === "10" ? "2.25" : "2.75"} fontWeight="900" fill="#fff7d6" stroke="rgba(0,0,0,0.72)" strokeWidth="0.25" paintOrder="stroke">
+                        {id}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+
+            {wheelSegments.map((_, index) => {
+              const angle = (index / wheelSegments.length) * 360 - 90;
+              const rad = (Math.PI / 180) * angle;
+              const x1 = 50 + 10 * Math.cos(rad);
+              const y1 = 50 + 10 * Math.sin(rad);
+              const x2 = 50 + 36 * Math.cos(rad);
+              const y2 = 50 + 36 * Math.sin(rad);
+              return <line key={`spoke-${index}`} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(80,45,20,0.18)" strokeWidth="0.35" />;
+            })}
+
+            <circle cx="50" cy="50" r="14" fill="#10202a" stroke="#f59e0b" strokeWidth="1.2" filter="url(#softShadow)" />
+            <text x="50" y="47.8" textAnchor="middle" fontSize="4.2" fontWeight="900" fill="#fef3c7" stroke="#3a210b" strokeWidth="0.45" paintOrder="stroke">TREASURE</text>
+            <text x="50" y="53.2" textAnchor="middle" fontSize="4.2" fontWeight="900" fill="#fef3c7" stroke="#3a210b" strokeWidth="0.45" paintOrder="stroke">ISLAND</text>
+          </svg>
+        </div>
+
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <p className="text-xs font-black uppercase tracking-wide text-slate-400">Segment sélectionné</p>
+            <div className="mt-3 flex items-center gap-3">
+              <ResultToken value={selectedWheelId} size="lg" />
+              <div>
+                <p className="text-2xl font-black text-white">{SYMBOLS.find((s) => s.id === selectedWheelId)?.short || selectedWheelId}</p>
+                <p className="text-sm text-slate-400">{SYMBOLS.find((s) => s.id === selectedWheelId)?.segments} segments sur 54 · {SYMBOLS.find((s) => s.id === selectedWheelId)?.expected.toFixed(2)}%</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2">
+            {SYMBOLS.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSelectedWheelId(s.id)}
+                className={`rounded-2xl border p-3 text-left transition ${selectedWheelId === s.id ? "border-amber-300 bg-amber-300/15" : "border-white/10 bg-black/25 hover:bg-white/10"}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-black text-white">{s.short || s.label}</span>
+                  <span className="text-xs font-bold text-slate-400">{s.segments}/54</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+                  <div className="h-full rounded-full bg-amber-300" style={{ width: `${s.expected}%` }} />
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+
+  const panels = { quick: quickPanel, recent: recentPanel, segments: segmentsPanel, boosters: boostersPanel, simulator: simulatorPanel, wheel: wheelPanel };
   const openPanelIds = panelOrder.filter((id) => !collapsedPanels[id]);
   const collapsedPanelIds = panelOrder.filter((id) => collapsedPanels[id]);
 
