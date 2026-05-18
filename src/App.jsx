@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Anchor, Coins, Compass, Gem, Skull } from "lucide-react";
 const Card = ({ children, className = "" }) => (
@@ -28,6 +28,29 @@ const SYMBOLS = [
 
 const BOOSTERS = ["2x", "3x", "5x", "7x", "10x", "20x"];
 const BONUS_IDS = ["loot", "marbles", "map", "treasure"];
+
+const STORAGE_KEY = "treasure-island-tracker-v1";
+
+const BET_LIMITS_BY_ID = {
+  "1": 1000,
+  "2": 1000,
+  "5": 1000,
+  "10": 500,
+  loot: 500,
+  marbles: 500,
+  map: 200,
+  treasure: 200,
+};
+
+const roundToTenth = (value) => Math.ceil((Number(value) || 0) * 10) / 10;
+const roundAndClampBetAmount = (id, value) => clampBetAmount(id, roundToTenth(value));
+const normalizeDecimalInput = (value) => String(value ?? "").replace(",", ".");
+const isValidDecimalInput = (value) => /^\d*\.?\d*$/.test(value);
+const clampBetAmount = (id, value) => {
+  const max = BET_LIMITS_BY_ID[id] ?? 1000;
+  const numeric = Math.max(0, Number(value) || 0);
+  return Math.min(max, numeric);
+};
 
 const BASE_PAYOUT_BY_ID = {
   "1": 1,
@@ -251,6 +274,13 @@ export default function TreasureIslandDashboard() {
     boosters: "full",
     simulator: "full",
   });
+  const [pinnedPanels, setPinnedPanels] = useState({
+    quick: true,
+    recent: true,
+    segments: true,
+    boosters: true,
+    simulator: true,
+  });
   const [swapA, setSwapA] = useState("quick");
   const [swapB, setSwapB] = useState("recent");
     const [bankrollStart, setBankrollStart] = useState(1000);
@@ -265,6 +295,28 @@ export default function TreasureIslandDashboard() {
     treasure: 0,
   });
   const [betSnapshots, setBetSnapshots] = useState({});
+  const [strategyActive, setStrategyActive] = useState(false);
+  const [strategyMultiplier, setStrategyMultiplier] = useState(2.2);
+  const [strategySteps, setStrategySteps] = useState({
+    "1": 1,
+    "2": 2,
+    "5": 5,
+    "10": 10,
+    loot: 5,
+    marbles: 10,
+    map: 10,
+    treasure: 20,
+  });
+  const [strategyLossCounters, setStrategyLossCounters] = useState({
+    "1": 0,
+    "2": 0,
+    "5": 0,
+    "10": 0,
+    loot: 0,
+    marbles: 0,
+    map: 0,
+    treasure: 0,
+  });
   const [simulationActive, setSimulationActive] = useState(false);
   const [simulationStartTime, setSimulationStartTime] = useState(null);
   const [simulationBaseLength, setSimulationBaseLength] = useState(0);
@@ -282,6 +334,166 @@ export default function TreasureIslandDashboard() {
     boosters: false,
     simulator: false,
   });
+  const [storageReady, setStorageReady] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const data = JSON.parse(saved);
+
+        if (Array.isArray(data.history)) setHistory(data.history);
+        if (Array.isArray(data.boosters)) setBoosters(data.boosters);
+        if (Array.isArray(data.rawGames)) setRawGames(data.rawGames);
+        if (data.importStatus) setImportStatus(data.importStatus);
+        if (typeof data.liveMode === "boolean") setLiveMode(data.liveMode);
+        if (data.range) setRange(data.range);
+        if (data.selectedBoosterSymbol) setSelectedBoosterSymbol(data.selectedBoosterSymbol);
+        if (data.selectedBoosterMulti) setSelectedBoosterMulti(data.selectedBoosterMulti);
+        if (data.selectedResult) setSelectedResult(data.selectedResult);
+        if (Array.isArray(data.panelOrder)) setPanelOrder(data.panelOrder);
+        if (data.panelSizes) setPanelSizes(data.panelSizes);
+        if (data.pinnedPanels) setPinnedPanels(data.pinnedPanels);
+        if (data.swapA) setSwapA(data.swapA);
+        if (data.swapB) setSwapB(data.swapB);
+        if (typeof data.bankrollStart === "number") setBankrollStart(data.bankrollStart);
+        if (data.betAmounts) setBetAmounts(data.betAmounts);
+        if (data.betSnapshots) setBetSnapshots(data.betSnapshots);
+        if (typeof data.strategyActive === "boolean") setStrategyActive(data.strategyActive);
+        if (data.strategyMultiplier !== undefined) setStrategyMultiplier(Number(data.strategyMultiplier) || 2.2);
+        if (data.strategySteps) setStrategySteps(data.strategySteps);
+        if (data.strategyLossCounters) setStrategyLossCounters(data.strategyLossCounters);
+        if (typeof data.simulationActive === "boolean") setSimulationActive(data.simulationActive);
+        if (data.simulationStartTime !== undefined) setSimulationStartTime(data.simulationStartTime);
+        if (typeof data.simulationBaseLength === "number") setSimulationBaseLength(data.simulationBaseLength);
+        if (Array.isArray(data.simulationRanges)) setSimulationRanges(data.simulationRanges);
+        if (data.simulationStartFrom !== undefined) setSimulationStartFrom(data.simulationStartFrom);
+        if (data.excludedSimulationRows) setExcludedSimulationRows(data.excludedSimulationRows);
+        if (Array.isArray(data.pausedSimulationRows)) setPausedSimulationRows(data.pausedSimulationRows);
+        if (data.lastPausedLength !== undefined) setLastPausedLength(data.lastPausedLength);
+        if (data.collapsedPanels) setCollapsedPanels(data.collapsedPanels);
+      }
+    } catch (error) {
+      console.warn("Impossible de charger les données sauvegardées", error);
+    } finally {
+      setStorageReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+
+    const payload = {
+      history,
+      boosters,
+      rawGames,
+      importStatus,
+      liveMode,
+      range,
+      selectedBoosterSymbol,
+      selectedBoosterMulti,
+      selectedResult,
+      panelOrder,
+      panelSizes,
+      pinnedPanels,
+      swapA,
+      swapB,
+      bankrollStart,
+      betAmounts,
+      betSnapshots,
+      strategyActive,
+      strategyMultiplier,
+      strategySteps,
+      strategyLossCounters,
+      simulationActive,
+      simulationStartTime,
+      simulationBaseLength,
+      simulationRanges,
+      simulationStartFrom,
+      excludedSimulationRows,
+      pausedSimulationRows,
+      lastPausedLength,
+      collapsedPanels,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [
+    storageReady,
+    history,
+    boosters,
+    rawGames,
+    importStatus,
+    liveMode,
+    range,
+    selectedBoosterSymbol,
+    selectedBoosterMulti,
+    selectedResult,
+    panelOrder,
+    panelSizes,
+    pinnedPanels,
+    swapA,
+    swapB,
+    bankrollStart,
+    betAmounts,
+    betSnapshots,
+    strategyActive,
+    strategyMultiplier,
+    strategySteps,
+    strategyLossCounters,
+    simulationActive,
+    simulationStartTime,
+    simulationBaseLength,
+    simulationRanges,
+    simulationStartFrom,
+    excludedSimulationRows,
+    pausedSimulationRows,
+    lastPausedLength,
+    collapsedPanels,
+  ]);
+
+  const resetBasicData = () => {
+    setHistory([]);
+    setBoosters([]);
+    setRawGames([]);
+    setImportStatus("Données de jeu réinitialisées");
+    setSimulationActive(false);
+    setSimulationStartTime(null);
+    setSimulationBaseLength(0);
+    setSimulationRanges([]);
+    setSimulationStartFrom(0);
+    setExcludedSimulationRows({});
+    setPausedSimulationRows([]);
+    setBetSnapshots({});
+    setStrategyActive(false);
+    setStrategyMultiplier(2.2);
+    setStrategySteps({
+      "1": 1,
+      "2": 2,
+      "5": 5,
+      "10": 10,
+      loot: 5,
+      marbles: 10,
+      map: 10,
+      treasure: 20,
+    });
+    setStrategyLossCounters({
+      "1": 0,
+      "2": 0,
+      "5": 0,
+      "10": 0,
+      loot: 0,
+      marbles: 0,
+      map: 0,
+      treasure: 0,
+    });
+    setEditingSimulationRowId(null);
+    setEditingBetAmounts(null);
+  };
+
+  const resetFullApp = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    window.location.reload();
+  };
 
   const togglePanel = (panel) => setCollapsedPanels((prev) => ({ ...prev, [panel]: !prev[panel] }));
   const togglePanelSize = (panel) => {
@@ -289,6 +501,9 @@ export default function TreasureIslandDashboard() {
       ...prev,
       [panel]: prev[panel] === "full" ? "half" : "full",
     }));
+  };
+  const togglePinnedPanel = (panel) => {
+    setPinnedPanels((prev) => ({ ...prev, [panel]: !prev[panel] }));
   };
   const panelLabels = {
     quick: "Résultats manuels des tours",
@@ -529,12 +744,81 @@ export default function TreasureIslandDashboard() {
       }
       return nextGames;
     });
+
+    if (simulationActive) {
+      applyStrategyAfterResult(selectedResult, betSnapshotAtSpin);
+    }
   };
 
   const undoLastSpin = () => {
     setHistory((h) => h.slice(0, -1));
     setBoosters((b) => b.slice(0, -1));
     setRawGames((games) => games.slice(0, -1));
+  };
+
+  const deleteSpecificSpin = (gameId, indexToDelete) => {
+    setHistory((prev) => prev.filter((_, index) => index !== indexToDelete));
+    setBoosters((prev) => prev.filter((_, index) => index !== indexToDelete));
+
+    setRawGames((prev) => {
+      if (!prev.length) return prev;
+      return prev.filter((game, index) => {
+        if (gameId) {
+          return game.gameId !== gameId;
+        }
+        return index !== indexToDelete;
+      });
+    });
+  };
+
+  const exportStrategyData = () => {
+    const payload = {
+      description: "Treasure Island Strategy Export",
+      exportedAt: new Date().toISOString(),
+      strategy: {
+        strategyActive,
+        strategyMultiplier,
+        strategySteps,
+        strategyLossCounters,
+        betAmounts,
+      },
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `treasure_strategy_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleStrategyUpload = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const payload = JSON.parse(String(reader.result));
+        const strategy = payload.strategy || payload;
+
+        if (typeof strategy.strategyActive === "boolean") setStrategyActive(strategy.strategyActive);
+        if (strategy.strategyMultiplier !== undefined) setStrategyMultiplier(strategy.strategyMultiplier);
+        if (strategy.strategySteps) setStrategySteps(strategy.strategySteps);
+        if (strategy.strategyLossCounters) setStrategyLossCounters(strategy.strategyLossCounters);
+        if (strategy.betAmounts) setBetAmounts(strategy.betAmounts);
+
+        setImportStatus("Stratégie importée avec succès");
+      } catch (error) {
+        setImportStatus("Erreur : stratégie invalide");
+      }
+    };
+
+    reader.readAsText(file);
+    event.target.value = "";
   };
 
   const exportJsonData = () => {
@@ -598,6 +882,9 @@ export default function TreasureIslandDashboard() {
 
         setRawGames((previousGames) => {
           const mergedGames = mergeGames(previousGames, parsed.raw);
+          const previousKeys = new Set(
+            previousGames.map((game, index) => game.gameId || `${game.gameStart || 0}-${game.gameResult || game.rc}-${index}`)
+          );
 
           setHistory(mergedGames.map((game) => RESULT_TO_ID[game.gameResult] || BET_CODE_TO_ID[game.rc] || String(game.gameResult)));
           setBoosters(
@@ -611,8 +898,35 @@ export default function TreasureIslandDashboard() {
               }))
           );
 
-          const addedCount = Math.max(0, mergedGames.length - previousGames.length);
-          setImportStatus(`${addedCount} nouveaux spins ajoutés · ${mergedGames.length} spins au total`);
+          const addedGames = mergedGames
+            .map((game, index) => ({ game, index, key: game.gameId || `${game.gameStart || 0}-${game.gameResult || game.rc}-${index}` }))
+            .filter((entry) => !previousKeys.has(entry.key));
+
+          if (simulationActive && addedGames.length) {
+            let rollingBets = { ...betAmounts };
+            let rollingCounters = { ...strategyLossCounters };
+            const snapshotsToAdd = {};
+
+            [...addedGames]
+              .sort((a, b) => a.index - b.index)
+              .forEach(({ game, index }) => {
+                const resultId = RESULT_TO_ID[game.gameResult] || BET_CODE_TO_ID[game.rc] || String(game.gameResult);
+                snapshotsToAdd[index] = { ...rollingBets };
+
+                const strategyResult = applyStrategyToRollingBets(resultId, rollingBets, rollingCounters);
+                rollingBets = strategyResult.bets;
+                rollingCounters = strategyResult.counters;
+              });
+
+            setBetSnapshots((previousSnapshots) => ({ ...previousSnapshots, ...snapshotsToAdd }));
+            setStrategyLossCounters(rollingCounters);
+            if (strategyActive) {
+              setBetAmounts(rollingBets);
+            }
+          }
+
+          const addedCount = addedGames.length;
+          setImportStatus(`${addedCount} nouveaux tours ajoutés · ${mergedGames.length} tours au total`);
           return mergedGames;
         });
       } catch (error) {
@@ -629,7 +943,7 @@ export default function TreasureIslandDashboard() {
       subtitle=""
       collapsed={collapsedPanels.quick}
       onToggle={() => togglePanel("quick")}
-      action={<Button onClick={() => togglePanelSize("quick")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.quick === "full" ? "½" : "↔"}</Button>}
+      action={<><Button onClick={() => togglePinnedPanel("quick")} className={`rounded-xl border border-white/10 ${pinnedPanels.quick ? "bg-amber-400 text-black" : "bg-black/25 hover:bg-white/15"}`}>📌</Button><Button onClick={() => togglePanelSize("quick")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.quick === "full" ? "½" : "↔"}</Button></>}
     >
       <div className="mb-4 flex justify-end gap-2">
         <Button onClick={undoLastSpin} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">Annuler</Button>
@@ -686,7 +1000,7 @@ export default function TreasureIslandDashboard() {
       subtitle=""
       collapsed={collapsedPanels.recent}
       onToggle={() => togglePanel("recent")}
-      action={<Button onClick={() => togglePanelSize("recent")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.recent === "full" ? "½" : "↔"}</Button>}
+      action={<><Button onClick={() => togglePinnedPanel("recent")} className={`rounded-xl border border-white/10 ${pinnedPanels.recent ? "bg-amber-400 text-black" : "bg-black/25 hover:bg-white/15"}`}>📌</Button><Button onClick={() => togglePanelSize("recent")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.recent === "full" ? "½" : "↔"}</Button></>}
     >
       <div className="mb-3 flex items-center justify-between rounded-2xl bg-black/25 px-4 py-3 text-sm text-slate-300">
         <span>{recentGames.length} tours affichés</span>
@@ -740,10 +1054,20 @@ export default function TreasureIslandDashboard() {
                 )}
               </div>
 
-              <div className={`min-w-[110px] rounded-2xl px-4 py-4 text-center text-2xl font-black shadow-inner ${boosterHits ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-slate-200"}`}>
+              <div className="flex flex-col items-end gap-2">
+                <button
+                  onClick={() => deleteSpecificSpin(game.gameId, recentGames.length - 1 - index)}
+                  className="rounded-xl bg-red-500/20 px-3 py-2 text-xs font-black text-red-200 transition hover:bg-red-500/30"
+                >
+                  Supprimer
+                </button>
+
+                <div className={`min-w-[110px] rounded-2xl px-4 py-4 text-center text-2xl font-black shadow-inner ${boosterHits ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-slate-200"}`}>
+
                 {(resultId === "map" || resultId === "treasure") && (game.minMul || game.maxMul)
                   ? `x${game.minMul || "?"}${game.maxMul ? ` - x${game.maxMul}` : ""}`
                   : `x${game.finalMul || game.payoutMul || 1}`}
+              </div>
               </div>
             </div>
           );
@@ -758,7 +1082,7 @@ export default function TreasureIslandDashboard() {
       subtitle=""
       collapsed={collapsedPanels.segments}
       onToggle={() => togglePanel("segments")}
-      action={<Button onClick={() => togglePanelSize("segments")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.segments === "full" ? "½" : "↔"}</Button>}
+      action={<><Button onClick={() => togglePinnedPanel("segments")} className={`rounded-xl border border-white/10 ${pinnedPanels.segments ? "bg-amber-400 text-black" : "bg-black/25 hover:bg-white/15"}`}>📌</Button><Button onClick={() => togglePanelSize("segments")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.segments === "full" ? "½" : "↔"}</Button></>}
     >
       <div className="overflow-hidden rounded-2xl border border-white/10">
         <table className="w-full text-sm">
@@ -788,7 +1112,7 @@ export default function TreasureIslandDashboard() {
       subtitle="Vue claire des multiplicateurs, symboles boostés et boosters gagnants"
       collapsed={collapsedPanels.boosters}
       onToggle={() => togglePanel("boosters")}
-      action={<Button onClick={() => togglePanelSize("boosters")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.boosters === "full" ? "½" : "↔"}</Button>}
+      action={<><Button onClick={() => togglePinnedPanel("boosters")} className={`rounded-xl border border-white/10 ${pinnedPanels.boosters ? "bg-amber-400 text-black" : "bg-black/25 hover:bg-white/15"}`}>📌</Button><Button onClick={() => togglePanelSize("boosters")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.boosters === "full" ? "½" : "↔"}</Button></>}
     >
       <div className="space-y-4">
         <div className="grid gap-3 md:grid-cols-3">
@@ -903,10 +1227,124 @@ export default function TreasureIslandDashboard() {
   );
 
   const updateBetAmount = (id, value) => {
-    setBetAmounts((prev) => ({ ...prev, [id]: Math.max(0, Number(value) || 0) }));
+    const cleaned = normalizeDecimalInput(value);
+    if (cleaned === "") {
+      setBetAmounts((prev) => ({ ...prev, [id]: "" }));
+      return;
+    }
+    if (!isValidDecimalInput(cleaned)) return;
+
+    const max = BET_LIMITS_BY_ID[id] ?? 1000;
+    const numeric = Number(cleaned);
+    if (Number.isFinite(numeric) && numeric > max) {
+      setBetAmounts((prev) => ({ ...prev, [id]: max }));
+      return;
+    }
+
+    setBetAmounts((prev) => ({ ...prev, [id]: cleaned }));
+  };
+
+  const commitBetAmount = (id) => {
+    setBetAmounts((prev) => {
+      const value = prev[id];
+      if (value === "" || value === ".") return { ...prev, [id]: 0 };
+      return { ...prev, [id]: roundToTenth(clampBetAmount(id, value)) };
+    });
   };
 
   const getCurrentBetSnapshot = () => ({ ...betAmounts });
+
+  const updateStrategyStep = (id, value) => {
+    const cleaned = String(value ?? "");
+
+    if (cleaned === "") {
+      setStrategySteps((prev) => ({
+        ...prev,
+        [id]: "",
+      }));
+      return;
+    }
+
+    if (!/^[0-9]*$/.test(cleaned)) return;
+
+    setStrategySteps((prev) => ({
+      ...prev,
+      [id]: cleaned,
+    }));
+  };
+
+  const commitStrategyStep = (id) => {
+    setStrategySteps((prev) => ({
+      ...prev,
+      [id]: Math.max(1, Math.round(Number(prev[id]) || 1)),
+    }));
+  };
+
+  const applyStrategyAfterResult = (resultId, snapshot) => {
+    if (!strategyActive) return;
+
+    const result = applyStrategyToRollingBets(resultId, snapshot, strategyLossCounters);
+    setBetAmounts(result.bets);
+    setStrategyLossCounters(result.counters);
+  };
+
+  const recalculateSessionStrategy = () => {
+    if (!simulationRows.length) return;
+
+    const orderedRows = [...simulationRows].sort((a, b) => a.sourceIndex - b.sourceIndex);
+    let rollingBets = { ...betAmounts };
+    let rollingCounters = {
+      "1": 0,
+      "2": 0,
+      "5": 0,
+      "10": 0,
+      loot: 0,
+      marbles: 0,
+      map: 0,
+      treasure: 0,
+    };
+    const snapshots = {};
+
+    orderedRows.forEach((row) => {
+      snapshots[row.sourceIndex] = { ...rollingBets };
+      const result = applyStrategyToRollingBets(row.result, rollingBets, rollingCounters);
+      rollingBets = result.bets;
+      rollingCounters = result.counters;
+    });
+
+    setBetSnapshots((prev) => ({ ...prev, ...snapshots }));
+    setBetAmounts(rollingBets);
+    setStrategyLossCounters(rollingCounters);
+  };
+
+  const applyStrategyToRollingBets = (resultId, rollingBets, rollingCounters) => {
+    if (!strategyActive) return { bets: rollingBets, counters: rollingCounters };
+
+    const multiplier = Math.max(1, Number(strategyMultiplier) || 1);
+    const nextBets = { ...rollingBets };
+    const nextCounters = { ...rollingCounters };
+
+    SYMBOLS.forEach((symbol) => {
+      const amountPlayed = Number(rollingBets[symbol.id] || 0);
+      if (amountPlayed <= 0) return;
+
+      if (symbol.id === resultId) {
+        nextCounters[symbol.id] = 0;
+        nextBets[symbol.id] = roundAndClampBetAmount(symbol.id, betAmounts[symbol.id] || rollingBets[symbol.id] || 0);
+        return;
+      }
+
+      const newLossCount = (Number(nextCounters[symbol.id]) || 0) + 1;
+      const step = Math.max(1, Number(strategySteps[symbol.id]) || 1);
+      nextCounters[symbol.id] = newLossCount;
+
+      if (newLossCount % step === 0) {
+        nextBets[symbol.id] = roundAndClampBetAmount(symbol.id, amountPlayed * multiplier);
+      }
+    });
+
+    return { bets: nextBets, counters: nextCounters };
+  };
 
   const getCurrentHistoryLength = () => rawGames.length || history.length;
 
@@ -961,10 +1399,33 @@ export default function TreasureIslandDashboard() {
   };
 
   const updateEditingBetAmount = (id, value) => {
+    const cleaned = normalizeDecimalInput(value);
+    if (cleaned === "") {
+      setEditingBetAmounts((prev) => ({ ...(prev || {}), [id]: "" }));
+      return;
+    }
+    if (!isValidDecimalInput(cleaned)) return;
+
+    const max = BET_LIMITS_BY_ID[id] ?? 1000;
+    const numeric = Number(cleaned);
+    if (Number.isFinite(numeric) && numeric > max) {
+      setEditingBetAmounts((prev) => ({ ...(prev || {}), [id]: max }));
+      return;
+    }
+
     setEditingBetAmounts((prev) => ({
       ...(prev || {}),
-      [id]: Math.max(0, Number(value) || 0),
+      [id]: cleaned,
     }));
+  };
+
+  const commitEditingBetAmount = (id) => {
+    setEditingBetAmounts((prev) => {
+      const current = prev || {};
+      const value = current[id];
+      if (value === "" || value === ".") return { ...current, [id]: 0 };
+      return { ...current, [id]: roundToTenth(clampBetAmount(id, value)) };
+    });
   };
 
   const saveEditingSimulationRow = (entry) => {
@@ -1011,7 +1472,8 @@ export default function TreasureIslandDashboard() {
         const totalStake = SYMBOLS.reduce((sum, s) => sum + (Number(snapshot[s.id]) || 0), 0);
         const betOnResult = Number(snapshot[result]) || 0;
         const payout = getPayoutMultiplier(result, entry.raw);
-        const win = betOnResult * payout;
+        const totalReturnMultiplier = payout > 0 ? payout + 1 : 0;
+        const win = betOnResult * totalReturnMultiplier;
         const profit = win - totalStake;
 
         return {
@@ -1037,11 +1499,27 @@ export default function TreasureIslandDashboard() {
     const stake = includedSimulationRows.reduce((sum, row) => sum + row.totalStake, 0);
     const win = includedSimulationRows.reduce((sum, row) => sum + row.win, 0);
     const profit = includedSimulationRows.reduce((sum, row) => sum + row.profit, 0);
+
+    let runningBankroll = bankrollStart;
+    let minBankroll = bankrollStart;
+    let maxBankroll = bankrollStart;
+    let biggestStake = 0;
+
+    includedSimulationRows.forEach((row) => {
+      runningBankroll += row.profit;
+      minBankroll = Math.min(minBankroll, runningBankroll);
+      maxBankroll = Math.max(maxBankroll, runningBankroll);
+      biggestStake = Math.max(biggestStake, row.totalStake);
+    });
+
     return {
       stake,
       win,
       profit,
       bankroll: bankrollStart + profit,
+      minBankroll,
+      maxBankroll,
+      biggestStake,
     };
   }, [includedSimulationRows, bankrollStart]);
 
@@ -1051,7 +1529,7 @@ export default function TreasureIslandDashboard() {
       subtitle="Comme si tu jouais directement sur le jeu"
       collapsed={collapsedPanels.simulator}
       onToggle={() => togglePanel("simulator")}
-      action={<Button onClick={() => togglePanelSize("simulator")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.simulator === "full" ? "½" : "↔"}</Button>}
+      action={<><Button onClick={() => togglePinnedPanel("simulator")} className={`rounded-xl border border-white/10 ${pinnedPanels.simulator ? "bg-amber-400 text-black" : "bg-black/25 hover:bg-white/15"}`}>📌</Button><Button onClick={() => togglePanelSize("simulator")} className="rounded-xl border border-white/10 bg-black/25 hover:bg-white/15">{panelSizes.simulator === "full" ? "½" : "↔"}</Button></>}
     >
       <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
         <div className="space-y-4">
@@ -1106,26 +1584,132 @@ export default function TreasureIslandDashboard() {
             <p className="mb-3 text-sm font-bold text-slate-200">Mise par issue / tour</p>
             <div className="space-y-2">
               {SYMBOLS.map((s) => (
-                <div key={s.id} className="grid grid-cols-[auto_1fr_90px] items-center gap-3 rounded-xl bg-white/5 px-3 py-2">
+                <div key={s.id} className="grid grid-cols-[72px_1fr] gap-3 rounded-xl bg-white/5 px-3 py-3">
                   <ResultToken value={s.id} />
-                  <span className="text-sm font-bold">{s.short || s.label}</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={betAmounts[s.id] === 0 ? "" : betAmounts[s.id]}
-                    onChange={(e) => {
-                      const cleaned = e.target.value.replace(",", ".");
-                      if (/^\d*\.?\d*$/.test(cleaned)) {
-                        updateBetAmount(s.id, cleaned);
-                      }
-                    }}
-                    placeholder="0"
-                    className="rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-right text-sm font-black text-white outline-none placeholder:text-slate-500 focus:border-amber-300"
-                  />
+
+                  <div className="min-w-0 space-y-2">
+                    <span className="block text-sm font-bold leading-tight">{s.short || s.label}</span>
+
+                    <div className="grid grid-cols-[32px_36px_minmax(0,1fr)_42px] items-center gap-1">
+                    <button
+                      onClick={() => updateBetAmount(s.id, 0)}
+                      className="h-9 rounded-lg bg-red-500/20 px-2 text-xs font-black text-red-200 hover:bg-red-500/30"
+                    >
+                      0
+                    </button>
+
+                    <button
+                      onClick={() => updateBetAmount(s.id, Math.max(0.1, Number(betAmounts[s.id] || 0) / 2))}
+                      className="h-9 rounded-lg bg-white/10 px-2 text-xs font-black text-slate-200 hover:bg-white/20"
+                    >
+                      /2
+                    </button>
+
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={betAmounts[s.id] === 0 ? "" : betAmounts[s.id]}
+                      onChange={(e) => updateBetAmount(s.id, e.target.value)}
+                      onBlur={() => commitBetAmount(s.id)}
+                      placeholder="0"
+                      className="h-9 w-full min-w-0 rounded-xl border border-white/10 bg-black/40 px-3 text-right text-sm font-black text-white outline-none placeholder:text-slate-500 focus:border-amber-300"
+                    />
+
+                    <button
+                      onClick={() => updateBetAmount(s.id, roundAndClampBetAmount(s.id, Number(betAmounts[s.id] || 0) * 2 || 1))}
+                      className="h-9 rounded-lg bg-amber-400/20 px-2 text-xs font-black text-amber-200 hover:bg-amber-400/30"
+                    >
+                      x2
+                    </button>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
+
+          <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-400/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-amber-200">Stratégie automatique</p>
+                  <p className="text-xs text-slate-400">Multiplie les mises perdantes selon une fréquence propre à chaque issue.</p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setStrategyActive((value) => !value)}
+                    className={`rounded-xl px-4 py-2 text-sm font-black transition ${strategyActive ? "bg-emerald-500 text-black" : "bg-white/10 text-slate-300 hover:bg-white/20"}`}
+                  >
+                    {strategyActive ? "Activée" : "Désactivée"}
+                  </button>
+
+                  <button
+                    onClick={recalculateSessionStrategy}
+                    className="rounded-xl bg-amber-400/20 px-4 py-2 text-sm font-black text-amber-200 transition hover:bg-amber-400/30"
+                  >
+                    Recalculer
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                <label className="text-xs font-bold text-slate-300">Multiplicateur après perte</label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-slate-400">x</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={strategyMultiplier}
+                    onChange={(e) => setStrategyMultiplier(e.target.value.replace(",", "."))}
+                    className="w-24 rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-right font-black text-white outline-none focus:border-amber-300"
+                    placeholder="2.2"
+                  />
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs text-slate-500">
+                Exemple : le 1 augmente toutes les pertes, le 2 toutes les 2 pertes, le 10 toutes les 10 pertes.
+              </p>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {SYMBOLS.map((s) => (
+                  <div
+                    key={s.id}
+                    className="rounded-2xl border border-white/10 bg-black/35 p-3"
+                  >
+                    <div className="mb-2 min-w-0">
+                      <p className="text-sm font-black leading-tight text-white">{s.short || s.label}</p>
+                      <p className="mt-0.5 text-[10px] leading-tight text-slate-500">Toutes les {strategySteps[s.id]} pertes</p>
+                    </div>
+
+                    <div className="grid grid-cols-[36px_1fr_36px] items-center gap-2">
+                      <button
+                        onClick={() => updateStrategyStep(s.id, Math.max(1, Number(strategySteps[s.id]) - 1))}
+                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-base font-black text-amber-200 transition hover:border-amber-300 hover:bg-amber-400/10"
+                      >
+                        −
+                      </button>
+
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={strategySteps[s.id]}
+                        onChange={(e) => updateStrategyStep(s.id, e.target.value)}
+                        onBlur={() => commitStrategyStep(s.id)}
+                        className="w-full rounded-xl border border-amber-300/30 bg-gradient-to-b from-black/70 to-black/30 px-2 py-2 text-center text-base font-black text-amber-200 shadow-inner shadow-black/40 outline-none transition focus:border-amber-300 focus:shadow-[0_0_20px_rgba(251,191,36,0.2)] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                      />
+
+                      <button
+                        onClick={() => updateStrategyStep(s.id, Number(strategySteps[s.id]) + 1)}
+                        className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-base font-black text-emerald-200 transition hover:border-emerald-300 hover:bg-emerald-400/10"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
 
           <div className="grid grid-cols-3 gap-2">
             <Button onClick={startSimulation} className="rounded-2xl bg-emerald-500 py-5 font-black text-black hover:bg-emerald-400">
@@ -1145,21 +1729,35 @@ export default function TreasureIslandDashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
-          <div className="mb-4 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-2xl bg-black/25 p-4"><p className="text-xs text-slate-400">Mises totales</p><p className="text-2xl font-black">€{simulationTotal.stake.toFixed(2)}</p></div>
-            <div className="rounded-2xl bg-black/25 p-4"><p className="text-xs text-slate-400">Gains totaux</p><p className="text-2xl font-black text-emerald-300">€{simulationTotal.win.toFixed(2)}</p></div>
-            <div className="rounded-2xl bg-black/25 p-4"><p className="text-xs text-slate-400">Profit</p><p className={`text-2xl font-black ${simulationTotal.profit > 0 ? "text-emerald-300" : simulationTotal.profit < 0 ? "text-red-300" : "text-slate-300"}`}>{simulationTotal.profit >= 0 ? "+" : ""}€{simulationTotal.profit.toFixed(2)}</p></div>
+        <div className="flex max-h-[1450px] flex-col rounded-2xl border border-white/10 bg-black/25 p-4">
+          <div className="space-y-4">
+            <div>
+              <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Données actuelles</p>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-2xl bg-black/25 p-4"><p className="text-xs text-slate-400">Mises totales</p><p className="text-2xl font-black">€{simulationTotal.stake.toFixed(2)}</p></div>
+                <div className="rounded-2xl bg-black/25 p-4"><p className="text-xs text-slate-400">Gains totaux</p><p className="text-2xl font-black text-emerald-300">€{simulationTotal.win.toFixed(2)}</p></div>
+                <div className="rounded-2xl bg-black/25 p-4"><p className="text-xs text-slate-400">Profit</p><p className={`text-2xl font-black ${simulationTotal.profit > 0 ? "text-emerald-300" : simulationTotal.profit < 0 ? "text-red-300" : "text-slate-300"}`}>{simulationTotal.profit >= 0 ? "+" : ""}€{simulationTotal.profit.toFixed(2)}</p></div>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-black uppercase tracking-wide text-slate-500">Données sur toute la session</p>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-2xl bg-red-950/20 p-4"><p className="text-xs text-slate-400">Bankroll min</p><p className="text-2xl font-black text-red-300">€{simulationTotal.minBankroll.toFixed(2)}</p></div>
+                <div className="rounded-2xl bg-emerald-950/20 p-4"><p className="text-xs text-slate-400">Bankroll max</p><p className="text-2xl font-black text-emerald-300">€{simulationTotal.maxBankroll.toFixed(2)}</p></div>
+                <div className="rounded-2xl bg-amber-950/20 p-4"><p className="text-xs text-slate-400">Plus grosse mise</p><p className="text-2xl font-black text-amber-200">€{simulationTotal.biggestStake.toFixed(2)}</p></div>
+              </div>
+            </div>
           </div>
 
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 mt-4 flex items-center justify-between">
             <div>
               <h3 className="text-lg font-black">Tours pris en compte</h3>
               <p className="text-sm text-slate-400">{includedSimulationRows.length}/{simulationRows.length} tours pris en compte</p>
             </div>
           </div>
 
-          <div className="max-h-[600px] space-y-2 overflow-y-auto pr-1">
+          <div className="mt-2 space-y-2 overflow-y-auto pr-1">
             {simulationRows.slice().reverse().map((entry, index) => {
               const excluded = Boolean(excludedSimulationRows[entry.id]);
               return (
@@ -1192,19 +1790,38 @@ export default function TreasureIslandDashboard() {
                         {SYMBOLS.map((s) => (
                           <label key={s.id} className="rounded-xl bg-white/5 p-2 text-xs font-bold text-slate-200">
                             {s.short || s.label}
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={editingBetAmounts?.[s.id] === 0 ? "" : editingBetAmounts?.[s.id] ?? ""}
-                              onChange={(e) => {
-                                const cleaned = e.target.value.replace(",", ".");
-                                if (/^\d*\.?\d*$/.test(cleaned)) {
-                                  updateEditingBetAmount(s.id, cleaned);
-                                }
-                              }}
-                              placeholder="0"
-                              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-right font-black text-white outline-none placeholder:text-slate-500 focus:border-amber-300"
-                            />
+                            <div className="mt-1 flex items-center gap-1">
+                              <button
+                                onClick={() => updateEditingBetAmount(s.id, 0)}
+                                className="rounded-lg bg-red-500/20 px-2 py-2 text-[10px] font-black text-red-200 hover:bg-red-500/30"
+                              >
+                                0
+                              </button>
+
+                              <button
+                                onClick={() => updateEditingBetAmount(s.id, Math.max(0.1, Number(editingBetAmounts?.[s.id] || 0) / 2))}
+                                className="rounded-lg bg-white/10 px-2 py-2 text-[10px] font-black text-slate-200 hover:bg-white/20"
+                              >
+                                /2
+                              </button>
+
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={editingBetAmounts?.[s.id] === 0 ? "" : editingBetAmounts?.[s.id] ?? ""}
+                                onChange={(e) => updateEditingBetAmount(s.id, e.target.value)}
+                                onBlur={() => commitEditingBetAmount(s.id)}
+                                placeholder="0"
+                                className="w-full min-w-0 flex-1 rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-right font-black text-white outline-none placeholder:text-slate-500 focus:border-amber-300"
+                              />
+
+                              <button
+                                onClick={() => updateEditingBetAmount(s.id, roundAndClampBetAmount(s.id, Number(editingBetAmounts?.[s.id] || 0) * 2 || 1))}
+                                className="rounded-lg bg-amber-400/20 px-2 py-2 text-[10px] font-black text-amber-200 hover:bg-amber-400/30"
+                              >
+                                x2
+                              </button>
+                            </div>
                           </label>
                         ))}
                       </div>
@@ -1238,11 +1855,11 @@ export default function TreasureIslandDashboard() {
   const collapsedPanelIds = panelOrder.filter((id) => collapsedPanels[id]);
 
   return (
-    <div className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_20%_0%,#1d5b67_0%,transparent_36%),radial-gradient(circle_at_80%_10%,#7a4b18_0%,transparent_30%),linear-gradient(135deg,#031018_0%,#07131c_46%,#020611_100%)] p-6 text-white">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_20%_0%,#1d5b67_0%,transparent_36%),radial-gradient(circle_at_80%_10%,#7a4b18_0%,transparent_30%),linear-gradient(135deg,#031018_0%,#07131c_46%,#020611_100%)] px-3 py-4 text-white sm:p-6">
       <div className="pointer-events-none fixed inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:48px_48px]" />
-      <div className="relative mx-auto max-w-7xl space-y-6">
-        <header className="overflow-hidden rounded-[2rem] border border-white/10 bg-[#071927]/75 p-6 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
-          <div className="grid gap-5 lg:grid-cols-[1fr_260px] lg:items-center">
+      <div className="relative mx-auto max-w-7xl space-y-4 sm:space-y-6">
+        <header className="rounded-[1.5rem] border border-white/10 bg-[#071927]/75 p-4 shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl sm:rounded-[2rem] sm:p-6">
+          <div className="grid gap-4 lg:grid-cols-[1fr_260px] lg:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sm text-slate-300">
                 <span className={`h-2.5 w-2.5 rounded-full ${liveMode ? "bg-red-500 animate-pulse" : "bg-slate-500"}`} />
@@ -1250,7 +1867,7 @@ export default function TreasureIslandDashboard() {
               </div>
               <div className="flex items-center gap-3">
                 <div className="rounded-2xl border border-amber-300/30 bg-amber-400/20 p-3 shadow-[0_0_35px_rgba(251,191,36,0.25)]"><Anchor className="h-7 w-7 text-amber-300" /></div>
-                <div><h1 className="bg-gradient-to-r from-amber-200 via-yellow-400 to-orange-300 bg-clip-text text-5xl font-black tracking-tight text-transparent">Treasure Island</h1><p className="text-sm font-semibold text-slate-300">Tracker live · historique · boosters · JSON Pragmatic</p></div>
+                <div><h1 className="bg-gradient-to-r from-amber-200 via-yellow-400 to-orange-300 bg-clip-text text-3xl font-black tracking-tight text-transparent sm:text-5xl">Treasure Island</h1><p className="text-xs font-semibold text-slate-300 sm:text-sm">Tracker live · historique · boosters · JSON Pragmatic</p></div>
               </div>
             </div>
 
@@ -1263,12 +1880,29 @@ export default function TreasureIslandDashboard() {
               <Button onClick={exportJsonData} className="w-full rounded-xl bg-emerald-500 py-3 font-black text-black hover:bg-emerald-400">
                 Export JSON
               </Button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block cursor-pointer rounded-xl bg-purple-500/20 px-3 py-3 text-center text-xs font-black text-purple-100 transition hover:bg-purple-500/30">
+                  Import stratégie
+                  <input type="file" accept="application/json,.json" onChange={handleStrategyUpload} className="hidden" />
+                </label>
+
+                <Button onClick={exportStrategyData} className="rounded-xl bg-purple-500/20 px-3 py-3 text-xs font-black text-purple-100 hover:bg-purple-500/30">
+                  Export stratégie
+                </Button>
+              </div>
+              <Button onClick={resetBasicData} className="w-full rounded-xl bg-white/10 py-3 font-black text-white hover:bg-white/20">
+                Reset données
+              </Button>
+              <Button onClick={resetFullApp} className="w-full rounded-xl bg-red-500/20 py-3 font-black text-red-200 hover:bg-red-500/30">
+                Reset app
+              </Button>
               <div className="rounded-2xl bg-black/25 px-4 py-3"><p className="text-xs text-slate-400">Import</p><p className="text-sm font-bold text-slate-200">{importStatus}</p></div>
             </div>
           </div>
         </header>
 
-        <section className="grid gap-4 rounded-[1.5rem] border border-white/10 bg-[#071927]/75 p-4 shadow-xl backdrop-blur-xl lg:grid-cols-[1fr_auto] lg:items-center">
+        <section className="grid gap-3 rounded-[1.5rem] border border-white/10 bg-[#071927]/75 p-3 shadow-xl backdrop-blur-xl sm:p-4 lg:grid-cols-[1fr_auto] lg:items-center">
           <div className="flex flex-wrap gap-3">
             {ranges.map((r) => <button key={r.id} onClick={() => setRange(r.id)} className={`rounded-full border px-4 py-2 text-sm font-bold transition ${range === r.id ? "border-amber-300 bg-amber-400 text-black shadow-[0_0_25px_rgba(251,191,36,0.25)]" : "border-white/10 bg-black/25 text-slate-300 hover:bg-white/10"}`}>{r.label}</button>)}
           </div>
@@ -1286,7 +1920,7 @@ export default function TreasureIslandDashboard() {
         </section>
 
         <div className="relative">
-          <main className="grid auto-rows-max grid-cols-1 gap-6 lg:grid-cols-12">
+          <main className="grid auto-rows-max grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-12">
             {openPanelIds.map((id) => {
               const isHalf = panelSizes[id] === "half";
 
@@ -1294,14 +1928,14 @@ export default function TreasureIslandDashboard() {
                 <motion.div
                   layout
                   key={id}
-                  drag
+                  drag={!pinnedPanels[id]}
                   dragMomentum={false}
                   dragElastic={0.08}
                   whileDrag={{ scale: 1.02, zIndex: 50 }}
                   className={isHalf ? "lg:col-span-6" : "lg:col-span-12"}
                 >
                   <div className="relative">
-                    <div className="absolute -top-2 left-1/2 z-10 h-1.5 w-24 -translate-x-1/2 rounded-full bg-white/10" />
+                    <div className={`absolute -top-2 left-1/2 z-10 h-1.5 w-24 -translate-x-1/2 rounded-full ${pinnedPanels[id] ? "bg-amber-300/60" : "bg-white/10"}`} />
                     {panels[id]}
                   </div>
                 </motion.div>
@@ -1310,19 +1944,40 @@ export default function TreasureIslandDashboard() {
           </main>
 
           {collapsedPanelIds.length > 0 && (
-            <aside className="fixed right-4 top-1/2 z-40 flex max-h-[80vh] w-56 -translate-y-1/2 flex-col gap-3 overflow-y-auto rounded-[1.5rem] border border-white/10 bg-[#07131c]/95 p-4 shadow-2xl backdrop-blur-xl">
-              <p className="text-xs font-black uppercase tracking-wide text-slate-400">Pages réduites</p>
+            <motion.aside
+              drag
+              dragMomentum={false}
+              dragElastic={0.08}
+              whileDrag={{ scale: 1.02 }}
+              initial={{ x: 0, y: 0 }}
+              className="absolute left-0 top-0 z-40 flex max-h-[80vh] w-[260px] flex-col gap-3 overflow-y-auto rounded-[1.5rem] border border-white/10 bg-[#07131c]/95 p-4 shadow-2xl backdrop-blur-xl"
+            >
+              <div className="mb-1 flex items-center justify-between">
+                <p className="text-xs font-black uppercase tracking-wide text-slate-400">Pages réduites</p>
+                <div className="h-1.5 w-14 rounded-full bg-white/10" />
+              </div>
+
               {collapsedPanelIds.map((id) => (
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   key={id}
                   onClick={() => togglePanel(id)}
-                  className="w-full rounded-2xl border border-white/10 bg-black/30 p-3 text-left transition hover:scale-[1.02] hover:bg-white/10"
+                  className="w-full cursor-grab rounded-2xl border border-white/10 bg-black/30 p-3 text-left active:cursor-grabbing"
                 >
-                  <p className="font-black text-white">{panelLabels[id]}</p>
-                  <p className="text-xs text-slate-400">Cliquer pour rouvrir</p>
-                </button>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-black text-white">{panelLabels[id]}</p>
+                      <p className="text-xs text-slate-400">Cliquer pour rouvrir</p>
+                    </div>
+
+                    <div className="rounded-lg border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-[10px] font-black text-amber-200">
+                      ↕
+                    </div>
+                  </div>
+                </motion.button>
               ))}
-            </aside>
+            </motion.aside>
           )}
         </div>
       </div>
