@@ -100,8 +100,10 @@ function getBetCodeFromId(id) {
 }
 
 function getPayoutMultiplier(resultId, game) {
-  if ((resultId === "map" || resultId === "treasure") && game?.minMul !== null && game?.minMul !== undefined) {
-    return Number(game.minMul) || 0;
+  if ((resultId === "map" || resultId === "treasure") && (game?.minMul !== null && game?.minMul !== undefined || game?.maxMul !== null && game?.maxMul !== undefined)) {
+    const min = Number(game?.minMul) || 0;
+    const max = Number(game?.maxMul) || min;
+    return (min + max) / 2;
   }
 
   if (game?.finalMul !== null && game?.finalMul !== undefined) return Number(game.finalMul) || 0;
